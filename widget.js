@@ -1,67 +1,146 @@
 import { defineWidget, useActiveNoteContext, useNoteProperty } from "trilium:preact";
-import { ConnectixAgent, WordProcessorAgent } from "antidote.js";
+import { ConnectixAgent, WordProcessorAgent, WordProcessorAgentTextArea } from "antidote.js";
 import { retrieveText, selectInterval, applyCorrection } from "antidote.js";
-import { getWebSocketPort, updateContent } from "utils.js";
+import { getWebSocketPort, updateContent, groupHTMLElements } from "utils.js";
 
 class WordProcessAgentTextNote extends WordProcessorAgent {
-    constructor(note, contentDiv) {
+    constructor(note, elements, content) {
         super();
         this.note = note;
-        this.contentDiv = contentDiv;
+        this.originalElements = elements;
+        this.fieldsToCorrect = elements.map(el => {
+            if (el.classList.contains("zone-pre")) {
+                const clone = document.createElement("div");
+                clone.classList.add("zone-pre");
+                clone.classList.add("zone-readonly");
+                const span = document.createElement("span");
+                span.textContent = "{{code}}";
+                clone.appendChild(span);
+
+                return clone;
+            } else if (el.classList.contains("zone-figure")) {
+                const clone = document.createElement("div");
+                clone.classList.add("zone-figure");
+                
+                const span = document.createElement("span");
+                clone.appendChild(span);
+
+                const figureCaption = el.querySelector("figcaption");
+                if (figureCaption) {
+                    span.textContent = "{{figure}}: ";
+                    
+                    const caption = document.createElement("div");
+                    caption.className = "zone-figcaption";
+                    caption.innerHTML = figureCaption.innerHTML;
+
+                    clone.appendChild(caption);
+                } else {
+                    span.textContent = "{{figure}}";
+                    clone.classList.add("zone-readonly");
+                }
+
+                return clone;
+            } else if (el.classList.contains("zone-section")) {
+                const clone = document.createElement("div");
+                clone.classList.add("zone-section");
+                clone.classList.add("zone-readonly");
+                const span = document.createElement("span");
+                span.textContent = "{{included note}}";
+                clone.appendChild(span);
+
+                return clone;
+            }
+
+            const clone = el.cloneNode(true);
+            return clone;
+        });
+        this.content = content;
     }
 
     sessionStarted() {
-        super.sessionStarted();
+        this.wrapDiv = document.createElement('div');
+        this.wrapDiv.style.display = 'none';
+        this.wrapDiv.append(...this.fieldsToCorrect);
+        document.body.appendChild(this.wrapDiv);
         
-        document.body.appendChild(this.contentDiv);
+        super.sessionStarted();
     }
 
     sessionEnded() {
-        const noteId = this.note.noteId;
-        const newContent = this.contentDiv.innerHTML;
-        
-        document.body.removeChild(this.contentDiv);
-        this.contentDiv = null;
+        document.body.removeChild(this.wrapDiv);
+        this.wrapDiv = null;
         
         super.sessionEnded();
-
-        updateContent(noteId, newContent);
     }
 
     configuration() {
         return {
-            documentTitle: this.note.title,
+            documentTitle: this.note.title
         };
     }
 
     correctIntoWordProcessor(params) {
-        if (params.zoneId !== this.note.noteId) return;
-        
+        const fieldToCorrect = this.fieldsToCorrect[Number(params.zoneId)];
         const rangeToCorrect = {
             start: params.positionStartReplace,
             end: params.positionReplaceEnd,
             string: params.newString
         };
-        return applyCorrection(this.contentDiv, rangeToCorrect);
+
+        const ret = applyCorrection(fieldToCorrect, rangeToCorrect);
+        if (ret) {
+            const newContent = this.originalElements.map((div, index) => {
+                if (div.classList.contains("zone-figure") &&
+                    !div.classList.contains("zone-readonly")) {
+                    const figCaption = div.querySelector("figcaption");
+
+                    const caption = this.fieldsToCorrect[index].querySelector(".zone-figcaption");
+
+                    figCaption.innerHTML = caption.innerHTML;
+
+                    return div.innerHTML;
+                } else if (div.classList.contains("zone-pre") ||
+                           div.classList.contains("zone-section")) {
+                    return div.innerHTML;
+                }
+                
+                return this.fieldsToCorrect[index].innerHTML;
+            }).join("");
+            updateContent(this.note.noteId, newContent);
+            return true;
+        }
+        
+        return false;
     }
 
     allowEdit(params) {
-        if (params.zoneId !== this.note.noteId) return;
-        const text = retrieveText(this.contentDiv);
+        const fieldToCorrect = this.fieldsToCorrect[Number(params.zoneId)];
+        if (fieldToCorrect.classList.contains("zone-readonly")) {
+            return false;
+        }
+        
+        if (fieldToCorrect.classList.contains("zone-figure") &&
+            params.positionStart <= "{{figure}}: ".length+1) {
+            return false;
+        }
+        
+        const text = retrieveText(fieldToCorrect);
         return text.substring(params.positionStart, params.positionEnd) == params.context;
     }
 
     selectInterval(params) {
-        if (params.zoneId !== this.note.noteId) return;
-        selectInterval(this.contentDiv, params.positionStart, params.positionEnd);
+        const fieldToCorrect = this.fieldsToCorrect[Number(params.zoneId)];
+        selectInterval(fieldToCorrect, params.positionStart, params.positionEnd);
     }
 
     zonesToCorrect(_params) {
-        return [{
-            text: retrieveText(this.contentDiv),
-            zoneId: this.note.noteId,
-            zoneIsFocused: false
-        }];
+        return this.fieldsToCorrect.map(function(value, index) {
+            return {
+                text: (value.classList.contains("zone-code")? "{{code}}": retrieveText(value)),
+                zoneId: index.toString(),
+                zoneIsFocused: index == 0
+            };
+        });
     }
 }
 
@@ -74,12 +153,10 @@ export default defineWidget({
         const detectContector = () => {
             note.getContent()
             .then(content => {
-                const tempDiv = document.createElement('div');
-                tempDiv.style.display = 'none';
-                tempDiv.innerHTML = content;
+                const elements = groupHTMLElements(content);
                 
                 return new ConnectixAgent(
-                    new WordProcessAgentTextNote(note, tempDiv), getWebSocketPort
+                    new WordProcessAgentTextNote(note, elements, content), getWebSocketPort
                 )
             })
             .then(agent => agent.connectWithAntidote().then(() => agent))
