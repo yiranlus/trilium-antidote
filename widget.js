@@ -1,10 +1,14 @@
 import { defineWidget, useActiveNoteContext, useNoteProperty } from "trilium:preact";
+// for Antidote Connectix Agent
 import { ConnectixAgent, WordProcessorAgent, WordProcessorAgentTextArea } from "antidote.js";
 import { retrieveText, selectInterval, applyCorrection } from "antidote.js";
+// for Antidote Connector
+import { AntidoteConnector, Antidote } from "antidote.js";
+
 import { getWebSocketPort, updateContent, groupHTMLElements } from "utils.js";
 
 class WordProcessAgentTextNote extends WordProcessorAgent {
-    constructor(note, elements, content) {
+    constructor(note, elements) {
         super();
         this.note = note;
         this.originalElements = elements;
@@ -54,7 +58,6 @@ class WordProcessAgentTextNote extends WordProcessorAgent {
             const clone = el.cloneNode(true);
             return clone;
         });
-        this.content = content;
     }
 
     sessionStarted() {
@@ -148,20 +151,43 @@ export default defineWidget({
     parent: "center-pane",
     render: () => {
         const { note, noteContext } = useActiveNoteContext();
+        console.log(note);
         const noteType = useNoteProperty(note, "type");
 
         const detectContector = () => {
             note.getContent()
             .then(content => {
                 const elements = groupHTMLElements(content);
+                if (elements.length === 0)
+                    throw new Error("content is empty.");
                 
-                return new ConnectixAgent(
-                    new WordProcessAgentTextNote(note, elements, content), getWebSocketPort
-                )
+                AntidoteConnector.announcePresence();
+                console.log("AntidoteConnector: ", AntidoteConnector);
+                console.log("Antidote Connector Enabled: ", AntidoteConnector.isDetected());
+
+                    return new ConnectixAgent(
+                        new WordProcessAgentTextNote(note, elements, content), getWebSocketPort
+                    )
+
+                if (AntidoteConnector.isDetected()) {
+                    // use Antidote Connector
+                    return new ConnectixAgent(
+                        new WordProcessAgentTextNote(note, elements),
+                        AntidoteConnector.getWebSocketPort
+                    )
+                } else {
+                    // use Antidote Connectix
+                    console.log("use Antidote Connectix");
+
+                    return new ConnectixAgent(
+                        new WordProcessAgentTextNote(note, elements),
+                        getWebSocketPort
+                    )
+                }
             })
             .then(agent => agent.connectWithAntidote().then(() => agent))
             .then(agent => agent.launchCorrector())
-            .catch(error => console.log(error));
+            .catch(error => api.showMessage(error));
         }
         
         return (
