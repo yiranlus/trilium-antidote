@@ -39,3 +39,5 @@ Output should be looking like below:
 ```
 
 In this case, you should add `#antidotePort=49156`.
+
+**Note:** if you use Trilium in the browser and installed Antidote Connector, this plugin will use Antidote Connector to get the WebSocket port, so you don't need to set `#antidotePort`.
