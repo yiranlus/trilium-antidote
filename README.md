@@ -22,6 +22,17 @@ npx rollup index.min.js --file antidote.js --format cjs
 
 After reloading the front-end, you will be able to see a button at the bottom right for text notes.
 
+## Features
+
+- [x] Launch the corrector with text notes, allow editing
+    - [x] heading, paragraph, aside
+    - [x] list items
+    - [x] figure caption, including image and table captions
+- [ ] Launch the corrector with code notes
+    - [ ] Text
+    - [ ] LaTeX
+    - [ ] Markdown
+
 ## Limitation
 
 This extension uses the local Connectix rather than Antidote Web. To connect to Connectix, we need to know the port first. However, the port is not fixed once Connectix has started. We need to manually tell the extension of the port.
